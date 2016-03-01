@@ -3,11 +3,12 @@ var fs = require('fs');
 var request = require('request');
 var cheerio = require('cheerio');
 var iconv = require('iconv-lite');
-fs = require('fs')
+var fs = require('fs');
+var Promise = require("bluebird");
+Promise.longStackTraces(); //debug
 var app = express();
 
 app.get('/scrape', function(req, res) {
-
   res.send('All done!');
 });
 
@@ -25,10 +26,8 @@ var getPage = function(page) {
       if (!error) {
         resolve(cheerio.load(iconv.encode(iconv.decode(new Buffer(html, 'binary'), 'cp1251'), 'utf8')));
       } else {
-        console.log("in Promise", error);
-        //reject(error);
+        reject(error);
       }
-
     });
   });
 
@@ -59,23 +58,23 @@ var grabber = function(next, list) {
         });
       else
         resolve(list);
-    }).catch(console.log);
+    }).catch((err) =>{
+      console.log("err grabber", err);
+    });
   });
 }
 
 var updateInfo = (pages) => {
   infos = [];
-  console.log(pages);
   pages.forEach((page) => {
     infos.push(new Promise((resolve, reject) => {
       getPage(page.link).then(($) => {
-        //console.log(page);
         page['outside'] = $('div.meta > a').eq(-1).attr('href');
         page['contacts'] = $('div.contacts > p').text();
         resolve(page);
       }).catch((err) => {
         console.log('updateInfo', err);
-        resole(page);
+        resolve(page);
       });
     }));
   });
@@ -86,21 +85,21 @@ var getMail = (pages) => {
   var allPages = [];
   pages.forEach((page) => {
     allPages.push(new Promise((resolve) => {
-      if (page.outside.length <= 0) {
+      if (!page.outside) {
         resolve(page);
-        return;
+      } else {
+        getPage(page.outside).then(($) => {
+          var email = $('a[href^="mailto:"]').eq(0).attr('href');
+          if (email) {
+            page['email'] = email;
+            console.log(page.outside, email);
+          }
+          resolve(page);
+        }).catch((err) => {
+          console.log("getMail err:", err);
+          resolve(page);
+        });
       }
-      getPage(page.outside).then(($) => {
-        var email = $('a[href^="mailto:"]').eq(0).attr('href');
-        if (email) {
-          page['email'] = email;
-          console.log(page.outside, email);
-        }
-        resolve(page);
-      }).catch((err) => {
-        console.log("getMail err:", err);
-        resole(page);
-      });
     }));
   });
   return Promise.all(allPages);
@@ -112,14 +111,12 @@ var grab = (urls) => {
   var grabbers = [];
   urls.forEach((url) => {
     grabbers.push(grabber(url, []).then(updateInfo).then(getMail));
-
   });
-  console.log(grabbers);
   return Promise.all(grabbers);
 };
 
 var urls = [];
-for (var i = 4; i < 8; i++) {
+for (var i = 1; i < 10; i++) {
   urls.push('http://www.wiki-prom.ru/' + i + 'otrasl.html');
 };
 grab(urls).then((res) => {
